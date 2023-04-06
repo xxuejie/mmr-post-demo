@@ -1,0 +1,16 @@
+[package]
+name = "tx-generator"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ckb-hash = "0.108.0"
+ckb-mock-tx-types = "0.108.0"
+ckb-jsonrpc-types = "0.108.0"
+ckb-types = "0.108.0"
+serde_json = "1.0"
+ckb-merkle-mountain-range = { git = "https://github.com/nervosnetwork/merkle-mountain-range", rev = "8206b58", default-features = false }
+blake2b-rs = { git = "https://github.com/nervosnetwork/blake2b-rs", rev = "4e694ee" }
+rand = "0.8.5"
