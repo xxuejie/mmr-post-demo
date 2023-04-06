@@ -4,7 +4,7 @@
 #![feature(alloc_error_handler)]
 #![feature(panic_info_message)]
 
-use alloc::{format, vec::Vec};
+use alloc::{boxed::Box, format, vec::Vec};
 use blake2b_rs::{Blake2b, Blake2bBuilder};
 use ckb_merkle_mountain_range::{
     compiled_proof::{verify, Packable, PackedLeaves, PackedMerkleProof},
@@ -21,22 +21,11 @@ default_alloc!();
 
 #[derive(Clone, Debug, PartialEq)]
 enum VariableBytes {
-    Hash([u8; 32]),
+    Hash(Box<[u8; 32]>),
     Dynamic(Vec<u8>),
 }
 
 impl VariableBytes {
-    fn empty_hash() -> Self {
-        VariableBytes::Hash([0u8; 32])
-    }
-
-    fn as_mut(&mut self) -> &mut [u8] {
-        match self {
-            VariableBytes::Hash(d) => &mut d[..],
-            VariableBytes::Dynamic(d) => d,
-        }
-    }
-
     fn as_bytes(&self) -> &[u8] {
         match self {
             VariableBytes::Hash(d) => &d[..],
@@ -58,9 +47,9 @@ impl Merge for Blake2bHash {
         HASH_BUILDER.build_from_ref(&mut hasher);
         hasher.update(&lhs.as_bytes());
         hasher.update(&rhs.as_bytes());
-        let mut ret = VariableBytes::empty_hash();
-        hasher.finalize(ret.as_mut());
-        Ok(ret)
+        let mut hash: Box<[u8; 32]> = Box::default();
+        hasher.finalize(&mut hash[..]);
+        Ok(VariableBytes::Hash(hash))
     }
 }
 
@@ -90,9 +79,9 @@ impl Packable for VariableBytes {
             return Err(Error::UnpackEof);
         }
         if len == 32 {
-            let mut ret = VariableBytes::empty_hash();
-            ret.as_mut().copy_from_slice(&data[2..2 + len]);
-            Ok((ret, 2 + len))
+            let mut d: Box<[u8; 32]> = Box::default();
+            d.copy_from_slice(&data[2..2 + len]);
+            Ok((VariableBytes::Hash(d), 2 + len))
         } else {
             let mut r = Vec::new();
             r.resize(len, 0);
@@ -103,8 +92,8 @@ impl Packable for VariableBytes {
 }
 
 pub fn program_entry() -> i8 {
-    let mut root = VariableBytes::empty_hash();
-    let root_length = match load_witness(root.as_mut(), 0, 0, Source::Input) {
+    let mut root_buffer: Box<[u8; 32]> = Box::default();
+    let root_length = match load_witness(&mut root_buffer[..], 0, 0, Source::Input) {
         Ok(l) => l,
         Err(e) => {
             debug(format!("Loading root error {:?}", e));
@@ -112,6 +101,7 @@ pub fn program_entry() -> i8 {
         }
     };
     assert!(root_length == 32);
+    let root = VariableBytes::Hash(root_buffer);
 
     let mut proof_buffer = [0u8; 32 * 1024];
     let proof_length = match load_witness(&mut proof_buffer, 0, 3, Source::Input) {
