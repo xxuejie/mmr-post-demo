@@ -7,6 +7,7 @@
 
 use alloc::{boxed::Box, format, vec::Vec};
 use blake2b_rs::{Blake2b, Blake2bBuilder};
+use bytes::{Bytes, BytesMut};
 use ckb_merkle_mountain_range::{
     compiled_proof::{verify, Packable, PackedLeaves, PackedMerkleProof},
     Error, Merge, Result,
@@ -16,7 +17,6 @@ use ckb_std::{
     default_alloc,
     syscalls::{debug, load_witness},
 };
-use core::mem::MaybeUninit;
 
 ckb_std::entry!(program_entry);
 default_alloc!();
@@ -24,7 +24,7 @@ default_alloc!();
 #[derive(Clone, Debug, PartialEq)]
 enum VariableBytes {
     Hash(Box<[u8; 32]>),
-    Dynamic(Vec<u8>),
+    Dynamic(Bytes),
 }
 
 impl VariableBytes {
@@ -68,7 +68,7 @@ impl Packable for VariableBytes {
         Ok(ret)
     }
 
-    fn unpack(data: &[u8]) -> Result<(Self, usize)> {
+    fn unpack(data: &Bytes) -> Result<(Self, usize)> {
         if data.len() < 2 {
             return Err(Error::UnpackEof);
         }
@@ -85,17 +85,9 @@ impl Packable for VariableBytes {
             d.copy_from_slice(&data[2..2 + len]);
             Ok((VariableBytes::Hash(d), 2 + len))
         } else {
-            let mut r = Vec::new();
-            r.resize(len, 0);
-            r.copy_from_slice(&data[2..2 + len]);
-            Ok((VariableBytes::Dynamic(r), 2 + len))
+            Ok((VariableBytes::Dynamic(data.slice(2..2 + len)), 2 + len))
         }
     }
-}
-
-static mut _PROOF_BUFFER: [u8; 32 * 1024] = [0u8; 32 * 1024];
-fn proof_buffer() -> &'static mut [u8] {
-    unsafe { &mut _PROOF_BUFFER }
 }
 
 pub fn program_entry() -> i8 {
@@ -110,31 +102,50 @@ pub fn program_entry() -> i8 {
     assert!(root_length == 32);
     let root = VariableBytes::Hash(root_buffer);
 
-    let proof_length = match load_witness(proof_buffer(), 0, 3, Source::Input) {
-        Ok(l) => l,
-        Err(e) => {
-            debug(format!("Loading proof error {:?}", e));
-            return -1;
+    let proof_buffer = {
+        let mut proof_buffer = BytesMut::with_capacity(32 * 1024);
+        unsafe {
+            proof_buffer.set_len(32 * 1024);
         }
+        let proof_length = match load_witness(&mut proof_buffer, 0, 3, Source::Input) {
+            Ok(l) => l,
+            Err(e) => {
+                debug(format!("Loading proof error {:?}", e));
+                return -1;
+            }
+        };
+        unsafe {
+            proof_buffer.set_len(proof_length);
+        }
+        proof_buffer.freeze()
     };
-    assert!(proof_length >= 8);
+    assert!(proof_buffer.len() >= 8);
     let mmr_size = {
         let mut buf = [0u8; 8];
-        buf.copy_from_slice(&proof_buffer()[0..8]);
+        buf.copy_from_slice(&proof_buffer[0..8]);
         u64::from_le_bytes(buf)
     };
-    let mut packed_proof = PackedMerkleProof::new(&proof_buffer()[8..proof_length]);
+    let actual_proof_buffer = proof_buffer.slice(8..);
+    let mut packed_proof = PackedMerkleProof::new(&actual_proof_buffer);
 
-    #[allow(invalid_value)]
-    let mut leaves_buffer: [u8; 32 * 1024] = unsafe { MaybeUninit::uninit().assume_init() };
-    let leaves_length = match load_witness(&mut leaves_buffer, 0, 2, Source::Input) {
-        Ok(l) => l,
-        Err(e) => {
-            debug(format!("Loading leaves error {:?}", e));
-            return -1;
+    let leaves_buffer = {
+        let mut leaves_buffer = BytesMut::with_capacity(32 * 1024);
+        unsafe {
+            leaves_buffer.set_len(32 * 1024);
         }
+        let leaves_length = match load_witness(&mut leaves_buffer, 0, 2, Source::Input) {
+            Ok(l) => l,
+            Err(e) => {
+                debug(format!("Loading leaves error {:?}", e));
+                return -1;
+            }
+        };
+        unsafe {
+            leaves_buffer.set_len(leaves_length);
+        }
+        leaves_buffer.freeze()
     };
-    let mut packed_leaves = PackedLeaves::new(&leaves_buffer[0..leaves_length]);
+    let mut packed_leaves = PackedLeaves::new(&leaves_buffer);
 
     let result =
         verify::<_, Blake2bHash, _, _>(&mut packed_proof, root, mmr_size, &mut packed_leaves)

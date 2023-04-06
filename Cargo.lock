@@ -160,6 +160,15 @@ dependencies = [
 [[package]]
 name = "ckb-merkle-mountain-range"
 version = "0.5.2"
+source = "git+https://github.com/xxuejie/merkle-mountain-range?rev=1405680#14056803718bba03bc129ac072fe04159dd98ebf"
+dependencies = [
+ "bytes",
+ "cfg-if",
+]
+
+[[package]]
+name = "ckb-merkle-mountain-range"
+version = "0.5.2"
 source = "git+https://github.com/nervosnetwork/merkle-mountain-range?rev=8206b58#8206b586c3534cce2a4ddbd0ffbc5e2a9ce04727"
 dependencies = [
  "cfg-if",
@@ -555,7 +564,8 @@ name = "rust-compiled-verifier"
 version = "0.1.0"
 dependencies = [
  "blake2b-rs 0.2.0 (git+https://github.com/nervosnetwork/blake2b-rs?rev=4e694ee)",
- "ckb-merkle-mountain-range 0.5.2 (git+https://github.com/xxuejie/merkle-mountain-range?rev=b5b4602)",
+ "bytes",
+ "ckb-merkle-mountain-range 0.5.2 (git+https://github.com/xxuejie/merkle-mountain-range?rev=1405680)",
  "ckb-std 0.12.1",
 ]
 

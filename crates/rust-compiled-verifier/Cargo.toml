@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ckb-merkle-mountain-range = { git = "https://github.com/xxuejie/merkle-mountain-range", rev = "b5b4602", default-features = false }
+ckb-merkle-mountain-range = { git = "https://github.com/xxuejie/merkle-mountain-range", rev = "1405680", default-features = false }
 ckb-std = "0.12.1"
 blake2b-rs = { git = "https://github.com/nervosnetwork/blake2b-rs", rev = "4e694ee" }
+bytes = { version = "1.4.0", default-features = false }
