@@ -48,7 +48,7 @@ impl Merge for Blake2bHash {
         hasher.update(&lhs.as_bytes());
         hasher.update(&rhs.as_bytes());
         let mut hash: Box<[u8; 32]> = Box::default();
-        hasher.finalize(&mut hash[..]);
+        hasher.finalize_from_ref(&mut hash[..]);
         Ok(VariableBytes::Hash(hash))
     }
 }
