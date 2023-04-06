@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 ckb-merkle-mountain-range = { git = "https://github.com/xxuejie/merkle-mountain-range", rev = "b5b4602", default-features = false }
-ckb-std = "0.11.0"
+ckb-std = "0.12.1"
 blake2b-rs = { git = "https://github.com/nervosnetwork/blake2b-rs", rev = "4e694ee" }
