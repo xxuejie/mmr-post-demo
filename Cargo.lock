@@ -160,6 +160,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ckb-merkle-mountain-range"
+version = "0.5.2"
+source = "git+https://github.com/xxuejie/merkle-mountain-range?rev=b5b4602#b5b4602cabe060101025c8df9e791167b5fb78ef"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "ckb-mock-tx-types"
 version = "0.108.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -611,7 +619,7 @@ dependencies = [
  "blake2b-rs 0.2.0 (git+https://github.com/nervosnetwork/blake2b-rs?rev=4e694ee)",
  "ckb-hash",
  "ckb-jsonrpc-types",
- "ckb-merkle-mountain-range 0.5.2 (git+https://github.com/nervosnetwork/merkle-mountain-range?rev=8206b58)",
+ "ckb-merkle-mountain-range 0.5.2 (git+https://github.com/xxuejie/merkle-mountain-range?rev=b5b4602)",
  "ckb-mock-tx-types",
  "ckb-types",
  "rand 0.8.5",

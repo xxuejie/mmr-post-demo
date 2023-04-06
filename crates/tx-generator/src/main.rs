@@ -1,7 +1,11 @@
 use blake2b_rs::{Blake2b, Blake2bBuilder};
 use ckb_hash::blake2b_256;
 use ckb_jsonrpc_types::JsonBytes;
-use ckb_merkle_mountain_range::{util::MemStore, MMRStoreReadOps, Merge, Result, MMR};
+use ckb_merkle_mountain_range::{
+    compiled_proof::{pack_compiled_merkle_proof, pack_leaves, Packable, ValueMerge},
+    util::MemStore,
+    Error, MMRStoreReadOps, Merge, Result, MMR,
+};
 use ckb_mock_tx_types::ReprMockTransaction;
 use ckb_types::H256;
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, RngCore, SeedableRng};
@@ -31,6 +35,37 @@ impl Merge for Blake2bHash {
         hash.resize(32, 0);
         hasher.finalize(&mut hash);
         Ok(VariableBytes(hash))
+    }
+}
+
+impl Packable for VariableBytes {
+    fn pack(&self) -> Result<Vec<u8>> {
+        if self.0.len() > u16::MAX as usize {
+            return Err(Error::UnpackEof);
+        }
+        let mut ret = Vec::new();
+        ret.resize(self.0.len() + 2, 0);
+        ret[0..2].copy_from_slice(&(self.0.len() as u16).to_le_bytes());
+        ret[2..].copy_from_slice(&self.0);
+        Ok(ret)
+    }
+
+    fn unpack(data: &[u8]) -> Result<(Self, usize)> {
+        if data.len() < 2 {
+            return Err(Error::UnpackEof);
+        }
+        let len = {
+            let mut buf = [0u8; 2];
+            buf.copy_from_slice(&data[0..2]);
+            u16::from_le_bytes(buf)
+        } as usize;
+        if data.len() < 2 + len {
+            return Err(Error::UnpackEof);
+        }
+        let mut r = Vec::new();
+        r.resize(len, 0);
+        r.copy_from_slice(&data[2..2 + len]);
+        Ok((VariableBytes(r), 2 + len))
     }
 }
 
@@ -101,23 +136,12 @@ fn main() {
         let mut data = vec![];
         data.extend(proof.mmr_size().to_le_bytes());
         for item in proof.proof_items() {
-            let len: u16 = item.0.len().try_into().expect("proof item size too long!");
-            data.extend(len.to_le_bytes());
-            data.extend(&item.0);
+            data.extend(item.pack().expect("pack"));
         }
         data
     };
 
-    let leaves_bytes: Vec<u8> = {
-        let mut data = vec![];
-        for (pos, item) in &leaves {
-            data.extend(pos.to_le_bytes());
-            let len: u16 = item.0.len().try_into().expect("leaf item size too long!");
-            data.extend(len.to_le_bytes());
-            data.extend(&item.0);
-        }
-        data
-    };
+    let leaves_bytes: Vec<u8> = pack_leaves(&leaves).expect("pack");
 
     println!(
         "Proof bytes: {}, leaf bytes: {} leaves: {}",
@@ -126,12 +150,22 @@ fn main() {
         leaves.len(),
     );
 
+    let mmr_size = proof.mmr_size();
+    let compiled_proof = proof.compile::<ValueMerge<_>>(chosen).expect("compile");
+    let compiled_proof_bytes: Vec<u8> = {
+        let mut data = vec![];
+        data.extend(mmr_size.to_le_bytes());
+        data.extend(pack_compiled_merkle_proof(&compiled_proof).expect("pack compiled proof"));
+        data
+    };
+
     let mut tx: ReprMockTransaction =
         from_str(&String::from_utf8_lossy(include_bytes!("./dummy_tx.json"))).expect("json");
 
     tx.tx.witnesses[0] = JsonBytes::from_vec(root.0);
     tx.tx.witnesses[1] = JsonBytes::from_vec(proof_bytes);
     tx.tx.witnesses[2] = JsonBytes::from_vec(leaves_bytes);
+    tx.tx.witnesses[3] = JsonBytes::from_vec(compiled_proof_bytes);
 
     for (i, arg) in args[2..].iter().enumerate() {
         let binary = std::fs::read(arg).expect("read");

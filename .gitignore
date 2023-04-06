@@ -2,3 +2,4 @@ target/
 tx.json
 *.data
 *.pprof
+c_verifier*
