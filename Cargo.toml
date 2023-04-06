@@ -2,6 +2,7 @@
 
 members = [
   "crates/rust-baseline-verifier",
+  "crates/rust-compiled-verifier",
   "crates/tx-generator",
 ]
 
