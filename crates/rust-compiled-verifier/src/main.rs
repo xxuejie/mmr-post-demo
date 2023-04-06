@@ -20,7 +20,23 @@ ckb_std::entry!(program_entry);
 default_alloc!();
 
 #[derive(Clone, Debug, PartialEq)]
-struct VariableBytes(Vec<u8>);
+enum VariableBytes {
+    Hash([u8; 32]),
+    Dynamic(Vec<u8>),
+}
+
+impl VariableBytes {
+    fn from_hash(h: [u8; 32]) -> Self {
+        VariableBytes::Hash(h)
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            VariableBytes::Hash(d) => &d[..],
+            VariableBytes::Dynamic(d) => &d,
+        }
+    }
+}
 
 const HASH_BUILDER: Blake2bBuilder = Blake2bBuilder::new_with_personal(32, *b"ckb-default-hash");
 
@@ -33,24 +49,24 @@ impl Merge for Blake2bHash {
     fn merge(lhs: &Self::Item, rhs: &Self::Item) -> Result<Self::Item> {
         let mut hasher = Blake2b::uninit();
         HASH_BUILDER.build_from_ref(&mut hasher);
-        hasher.update(&lhs.0[..]);
-        hasher.update(&rhs.0[..]);
-        let mut hash = Vec::new();
-        hash.resize(32, 0);
+        hasher.update(&lhs.as_bytes());
+        hasher.update(&rhs.as_bytes());
+        let mut hash = [0u8; 32];
         hasher.finalize(&mut hash);
-        Ok(VariableBytes(hash))
+        Ok(VariableBytes::from_hash(hash))
     }
 }
 
 impl Packable for VariableBytes {
     fn pack(&self) -> Result<Vec<u8>> {
-        if self.0.len() > u16::MAX as usize {
+        let d = self.as_bytes();
+        if d.len() > u16::MAX as usize {
             return Err(Error::UnpackEof);
         }
         let mut ret = Vec::new();
-        ret.resize(self.0.len() + 2, 0);
-        ret[0..2].copy_from_slice(&(self.0.len() as u16).to_le_bytes());
-        ret[2..].copy_from_slice(&self.0);
+        ret.resize(d.len() + 2, 0);
+        ret[0..2].copy_from_slice(&(d.len() as u16).to_le_bytes());
+        ret[2..].copy_from_slice(d);
         Ok(ret)
     }
 
@@ -66,10 +82,16 @@ impl Packable for VariableBytes {
         if data.len() < 2 + len {
             return Err(Error::UnpackEof);
         }
-        let mut r = Vec::new();
-        r.resize(len, 0);
-        r.copy_from_slice(&data[2..2 + len]);
-        Ok((VariableBytes(r), 2 + len))
+        if len == 32 {
+            let mut d = [0u8; 32];
+            d.copy_from_slice(&data[2..2 + len]);
+            Ok((VariableBytes::from_hash(d), 2 + len))
+        } else {
+            let mut r = Vec::new();
+            r.resize(len, 0);
+            r.copy_from_slice(&data[2..2 + len]);
+            Ok((VariableBytes::Dynamic(r), 2 + len))
+        }
     }
 }
 
@@ -83,7 +105,7 @@ pub fn program_entry() -> i8 {
         }
     };
     assert!(root_length == 32);
-    let root = VariableBytes(root_buffer.to_vec());
+    let root = VariableBytes::from_hash(root_buffer);
 
     let mut proof_buffer = [0u8; 32 * 1024];
     let proof_length = match load_witness(&mut proof_buffer, 0, 3, Source::Input) {
