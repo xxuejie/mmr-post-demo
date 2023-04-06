@@ -3,8 +3,9 @@
 #![feature(lang_items)]
 #![feature(alloc_error_handler)]
 #![feature(panic_info_message)]
+#![feature(new_uninit)]
 
-use alloc::{format, vec::Vec};
+use alloc::{boxed::Box, format, vec::Vec};
 use blake2b_rs::{Blake2b, Blake2bBuilder};
 use ckb_merkle_mountain_range::{Merge, MerkleProof, Result};
 use ckb_std::{
@@ -12,18 +13,27 @@ use ckb_std::{
     default_alloc,
     syscalls::{debug, load_witness},
 };
+use core::mem::MaybeUninit;
 
 ckb_std::entry!(program_entry);
 default_alloc!();
 
 #[derive(Clone, Debug, PartialEq)]
-struct VariableBytes(Vec<u8>);
-
-fn new_blake2b() -> Blake2b {
-    Blake2bBuilder::new(32)
-        .personal(b"ckb-default-hash")
-        .build()
+enum VariableBytes {
+    Hash(Box<[u8; 32]>),
+    Dynamic(Vec<u8>),
 }
+
+impl VariableBytes {
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            VariableBytes::Hash(d) => &d[..],
+            VariableBytes::Dynamic(d) => &d,
+        }
+    }
+}
+
+const HASH_BUILDER: Blake2bBuilder = Blake2bBuilder::new_with_personal(32, *b"ckb-default-hash");
 
 #[derive(Debug)]
 struct Blake2bHash;
@@ -32,19 +42,24 @@ impl Merge for Blake2bHash {
     type Item = VariableBytes;
 
     fn merge(lhs: &Self::Item, rhs: &Self::Item) -> Result<Self::Item> {
-        let mut hasher = new_blake2b();
-        hasher.update(&lhs.0[..]);
-        hasher.update(&rhs.0[..]);
-        let mut hash = Vec::new();
-        hash.resize(32, 0);
-        hasher.finalize(&mut hash);
-        Ok(VariableBytes(hash))
+        let mut hasher = Blake2b::uninit();
+        HASH_BUILDER.build_from_ref(&mut hasher);
+        hasher.update(&lhs.as_bytes());
+        hasher.update(&rhs.as_bytes());
+        let mut hash: Box<[u8; 32]> = unsafe { Box::new_uninit().assume_init() };
+        hasher.finalize_from_ref(&mut hash[..]);
+        Ok(VariableBytes::Hash(hash))
     }
 }
 
+static mut _PROOF_BUFFER: [u8; 32 * 1024] = [0u8; 32 * 1024];
+fn proof_buffer() -> &'static mut [u8] {
+    unsafe { &mut _PROOF_BUFFER }
+}
+
 pub fn program_entry() -> i8 {
-    let mut root_buffer = [0u8; 32];
-    let root_length = match load_witness(&mut root_buffer, 0, 0, Source::Input) {
+    let mut root_buffer: Box<[u8; 32]> = unsafe { Box::new_uninit().assume_init() };
+    let root_length = match load_witness(&mut root_buffer[..], 0, 0, Source::Input) {
         Ok(l) => l,
         Err(e) => {
             debug(format!("Loading root error {:?}", e));
@@ -52,10 +67,9 @@ pub fn program_entry() -> i8 {
         }
     };
     assert!(root_length == 32);
-    let root = VariableBytes(root_buffer.to_vec());
+    let root = VariableBytes::Hash(root_buffer);
 
-    let mut proof_buffer = [0u8; 32 * 1024];
-    let proof_length = match load_witness(&mut proof_buffer, 0, 1, Source::Input) {
+    let proof_length = match load_witness(proof_buffer(), 0, 1, Source::Input) {
         Ok(l) => l,
         Err(e) => {
             debug(format!("Loading proof error {:?}", e));
@@ -66,7 +80,7 @@ pub fn program_entry() -> i8 {
         assert!(proof_length >= 8);
         let mmr_size = {
             let mut buf = [0u8; 8];
-            buf.copy_from_slice(&proof_buffer[0..8]);
+            buf.copy_from_slice(&proof_buffer()[0..8]);
             u64::from_le_bytes(buf)
         };
 
@@ -76,20 +90,21 @@ pub fn program_entry() -> i8 {
             assert!(proof_length >= i + 2);
             let len = {
                 let mut buf = [0u8; 2];
-                buf.copy_from_slice(&proof_buffer[i..i + 2]);
+                buf.copy_from_slice(&proof_buffer()[i..i + 2]);
                 u16::from_le_bytes(buf) as usize
             };
             assert!(proof_length >= i + 2 + len);
             let mut buf = Vec::new();
             buf.resize(len, 0);
-            buf.copy_from_slice(&proof_buffer[i + 2..i + 2 + len]);
-            items.push(VariableBytes(buf));
+            buf.copy_from_slice(&proof_buffer()[i + 2..i + 2 + len]);
+            items.push(VariableBytes::Dynamic(buf));
             i += 2 + len;
         }
         MerkleProof::new(mmr_size, items)
     };
 
-    let mut leaves_buffer = [0u8; 32 * 1024];
+    #[allow(invalid_value)]
+    let mut leaves_buffer: [u8; 32 * 1024] = unsafe { MaybeUninit::uninit().assume_init() };
     let leaves_length = match load_witness(&mut leaves_buffer, 0, 2, Source::Input) {
         Ok(l) => l,
         Err(e) => {
@@ -116,7 +131,7 @@ pub fn program_entry() -> i8 {
             let mut buf = Vec::new();
             buf.resize(len, 0);
             buf.copy_from_slice(&leaves_buffer[i + 10..i + 10 + len]);
-            leaves.push((pos, VariableBytes(buf)));
+            leaves.push((pos, VariableBytes::Dynamic(buf)));
             i += 10 + len;
         }
         leaves
