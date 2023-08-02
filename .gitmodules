@@ -1,3 +1,6 @@
 [submodule "c/ckb-c-stdlib"]
 	path = c/ckb-c-stdlib
 	url = https://github.com/nervosnetwork/ckb-c-stdlib
+[submodule "clang-rv-cc"]
+	path = clang-rv-cc
+	url = https://github.com/xxuejie/clang-rv-cc
